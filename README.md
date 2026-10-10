@@ -3,6 +3,48 @@
 DSH profile plugin: **on-demand lifecycle for the local llama.cpp Qwen
 server, driven by the model dropdown, with zero changes to DSH.**
 
+## Current scope and maturity
+
+Version 0.1.1 is an early Windows/Qwen-focused release. Its proxy and
+cancellation logic are reusable, but its launch mechanism and server probes
+assume the setup described below. Compatibility with other operating systems,
+GPU types, models, or serving backends has not been established.
+
+| Area | Current implementation and validation |
+| --- | --- |
+| Operating system | Windows; launches `powershell.exe`. Linux and macOS lifecycle support is not implemented or tested. |
+| Server | One configured llama.cpp-compatible backend, checked through `/v1/models` and `/props`. OpenAI API compatibility alone does not establish lifecycle compatibility. |
+| Live validation | Windows, NVIDIA RTX 5090, TurboQuant llama.cpp build `f6124e91`, Qwen3.8 27B Q6_K_L with its vision projector. |
+| Node.js | Package declares Node.js 20 or newer; current local tests ran on Node.js 24.19.0. Other declared versions have not been validated. |
+| Launch scripts | Existing local PowerShell start/stop scripts supplied by the installer; neither scripts nor model weights are bundled. |
+| Model selection | Reads the selected model ID's context size and resizes the configured server. The external start script determines the weights and GPU arguments; the plugin does not automatically switch model files. |
+| CUDA graphs | Optional workaround observed on the tested Windows/TurboQuant setup; results have not been established across other hardware or builds. |
+
+The default script paths assume a TurboQuant installation beneath the current
+user's `OneDrive/Projects/TurboQuantLlamaCppSetup`. Configure your own paths
+before using a different installation. The proxy serves `/v1/*` on loopback;
+this release manages one backend and leaves it running between requests.
+
+### Test coverage and limits
+
+Eight automated tests cover five HTTP proxy behaviours (disconnects during
+prefill and output, normal completion, non-streaming errors, and interrupted
+upstream streams) and three launcher argument/environment checks. The HTTP
+tests use local mock servers; the launcher tests do not start a real model.
+
+Separate manual checks on the setup above exercised a real plugin cold start,
+long-prompt processing, and cancellation followed by another request. These
+checks provide evidence for that configuration, rather than a compatibility
+matrix. Real start/stop/resize orchestration and DSH host reloads are not
+covered by the automated tests.
+
+Portable launch commands, backend-specific lifecycle checks, and broader
+orchestration and platform tests remain future work. No compatibility claim
+is made for other OpenAI-compatible backends merely because their requests
+can be proxied.
+
+## How it works
+
 - Runs a small OpenAI-compatible proxy at `127.0.0.1:8081` *inside the DSH
   host process* (it dies with the harness; nothing extra to manage).
 - DSH points at it with one line in `~/.dsh/settings.yaml`:
@@ -18,6 +60,23 @@ server, driven by the model dropdown, with zero changes to DSH.**
 - Nothing ever auto-stops the server. A server started by the plugin
   outlives a harness restart and is adopted on the next probe.
 - Log: `~/.dsh/logs/local-model.log`.
+
+### Diagnostics and console window
+
+The current launcher starts PowerShell hidden (`windowsHide: true`), so a
+plugin-started Qwen server has no visible diagnostic console. Console visibility
+is not currently configurable. The model can still run and serve requests
+without that window.
+
+`~/.dsh/logs/local-model.log` contains proxy activity, startup progress, and
+launcher failures. The plugin discards launcher stdout and captures the last
+4000 characters of stderr for reporting when the launcher exits unsuccessfully;
+this file is not a complete llama.cpp diagnostic transcript.
+
+The existing TurboQuant start script writes its own llama.cpp diagnostic files
+under `OneDrive/Projects/TurboQuantLlamaCppSetup/logs`. Use the newest log there
+for backend details. If you supply a different start script, its own logging
+must preserve the diagnostic output you need.
 
 ## 0.1.1: cancellation and timeouts
 
@@ -39,14 +98,20 @@ server on Windows, set `disableCudaGraphs: true` in the
 `GGML_CUDA_DISABLE_GRAPHS=1` only in the Qwen launch environment; voice
 servers and the DSH host keep their own settings. The plugin's fallback
 default is `false`; the supplied Windows/TurboQuant bundle explicitly
-enables it. Set it to `false` to use the backend's normal graph policy.
-Restart an already running Qwen server to apply it.
+enables it for the tested setup. This bundled choice is not a recommendation
+for every machine. With `false`, the plugin leaves the inherited graph
+environment unchanged; if the variable is unset, the backend uses its own
+default policy. Restart an already running Qwen server to apply a change.
+
+This option turns CUDA graphs off while keeping Qwen on the GPU. It does not
+select CPU inference or change a voice plugin's CPU/GPU TTS selection.
 
 On the affected RTX 5090 setup, disabling graphs restored fast processing
 of a 100k-token prompt while keeping the GPU voice model loaded. It is a
 workaround for the observed runtime behaviour, not a diagnosis of a
 particular driver or llama.cpp defect. Token generation may be slightly
-slower without graphs. The 30-minute DSH stream-idle deadline stays intact.
+slower without graphs. The plugin does not set DSH's stream-idle timeout;
+the tested profile's existing 30-minute deadline was preserved.
 
 The server launches hidden through PowerShell `-File`, passing the script
 path and context as separate arguments and respecting the configured execution
@@ -94,6 +159,21 @@ scripts use the existing Windows TurboQuant setup beneath the current user's
 not bundled. The start script must accept `-ContextSize`, and the stop script
 must stop the intended server. Point the provider's `baseURL` at
 `http://127.0.0.1:8081/v1`.
+
+### Configuration contract
+
+| Setting or interface | Required behaviour / default |
+| --- | --- |
+| `startScript` | Local `.ps1` file accepting a positive integer `-ContextSize`; starts the configured backend. Execution respects Windows policy. |
+| `stopScript` | Local `.ps1` file stopping the intended backend. Process selection belongs to this script; review it before use alongside other model servers. |
+| `settingsPath` | Defaults to `~/.dsh/profiles/web/cordis.patch.yml`. Context lookup uses a simple line reader expecting an unquoted `- id: <model-id>` followed by a numeric `contextWindow:`; full YAML syntax, aliases, and computed values are not supported. |
+| `defaultContextSize` | `225000` tokens, used when the request has no model ID or no matching numeric context entry can be read. Choose a value appropriate for your model and hardware. |
+| `proxyHost` / `proxyPort` | `127.0.0.1` / `8081`. |
+| `targetHost` / `targetPort` | `127.0.0.1` / `8080`. |
+| `startTimeoutMs` | `420000` ms (seven minutes) to become ready; nonzero launcher exits are reported earlier. This is separate from DSH's inference timeout. |
+| `logPath` | Defaults to `~/.dsh/logs/local-model.log`. |
+| Context probe | Reads numeric `default_generation_settings.n_ctx` from `/props`, with top-level `n_ctx` as a fallback. Allows rounding up by less than 4096 tokens. If context is unavailable, an already running server is trusted without resizing. |
+| `disableCudaGraphs` | Component fallback `false`; bundled patch `true`. See the tested workaround and inherited-environment behaviour above. |
 
 For profiles installed under the previous unscoped name, replace
 `dsh-local-model-manager` with `@martin/dsh-local-model-manager` in the profile's
