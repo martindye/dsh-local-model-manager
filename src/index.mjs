@@ -52,6 +52,7 @@ const DEFAULTS = {
   keepAliveMs: 15000,
   maxBodyBytes: 50 * 1024 * 1024,
   disableCudaGraphs: false,
+  openConsole: true,
 }
 
 let cfg = {}
@@ -125,7 +126,7 @@ function ctxMatches(nCtx, requested) {
 /* ------------------------------------------------------------------ */
 
 function startServer(contextSize) {
-  log(`starting server: ${cfg.startScript} -ContextSize ${contextSize} (CUDA graphs ${cfg.disableCudaGraphs ? 'disabled' : 'default'})`)
+  log(`starting server: ${cfg.startScript} -ContextSize ${contextSize} (CUDA graphs ${cfg.disableCudaGraphs ? 'disabled' : 'default'}, console ${cfg.openConsole ? 'visible' : 'hidden'})`)
   const launch = serverLaunch(cfg, contextSize, process.env)
   const child = spawn(launch.command, launch.args, launch.options)
   let errorTail = ''

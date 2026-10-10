@@ -1,6 +1,6 @@
 {
   "name": "@martin/dsh-local-model-manager",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DSH profile plugin: on-demand lifecycle for the local llama.cpp Qwen server, matched to the model dropdown, via a loopback OpenAI-compatible proxy. Zero changes to DSH itself.",
   "type": "module",
   "main": "src/index.mjs",

@@ -5,7 +5,7 @@ server, driven by the model dropdown, with zero changes to DSH.**
 
 ## Current scope and maturity
 
-Version 0.1.1 is an early Windows/Qwen-focused release. Its proxy and
+Version 0.1.2 is an early Windows/Qwen-focused release. Its proxy and
 cancellation logic are reusable, but its launch mechanism and server probes
 assume the setup described below. Compatibility with other operating systems,
 GPU types, models, or serving backends has not been established.
@@ -27,9 +27,9 @@ this release manages one backend and leaves it running between requests.
 
 ### Test coverage and limits
 
-Eight automated tests cover five HTTP proxy behaviours (disconnects during
+Ten automated tests cover five HTTP proxy behaviours (disconnects during
 prefill and output, normal completion, non-streaming errors, and interrupted
-upstream streams) and three launcher argument/environment checks. The HTTP
+upstream streams) and five launcher argument/environment checks. The HTTP
 tests use local mock servers; the launcher tests do not start a real model.
 
 Separate manual checks on the setup above exercised a real plugin cold start,
@@ -37,6 +37,12 @@ long-prompt processing, and cancellation followed by another request. These
 checks provide evidence for that configuration, rather than a compatibility
 matrix. Real start/stop/resize orchestration and DSH host reloads are not
 covered by the automated tests.
+
+For 0.1.2, a separate Windows smoke test used a dummy start script to confirm
+that the visible launcher displays stdout, native stderr, and PowerShell host
+messages. A live log viewer was also checked against an already running model
+without restarting it. These checks do not add other platforms to the support
+scope.
 
 Portable launch commands, backend-specific lifecycle checks, and broader
 orchestration and platform tests remain future work. No compatibility claim
@@ -63,20 +69,57 @@ can be proxied.
 
 ### Diagnostics and console window
 
-The current launcher starts PowerShell hidden (`windowsHide: true`), so a
-plugin-started Qwen server has no visible diagnostic console. Console visibility
-is not currently configurable. The model can still run and serve requests
-without that window.
+From 0.1.2, `openConsole` defaults to `true`. The plugin uses a hidden
+supervisor to start the configured PowerShell script in a separate visible
+console with its diagnostic output connected to that window. The supervisor
+waits for the script and propagates its exit code. Closing the model's own
+console can stop the model.
+
+To choose the behaviour, add this setting to the `local-model-manager` row in
+your web profile's `cordis.patch.yml`:
+
+```yaml
+- id: local-model-manager
+  config:
+    openConsole: true
+```
+
+Set `openConsole: false` to launch hidden. The value must be a boolean. The
+option controls future starts: it does not restart a model or change the
+window of an already running process. The DSH host must load the plugin update
+before the new setting takes effect.
 
 `~/.dsh/logs/local-model.log` contains proxy activity, startup progress, and
-launcher failures. The plugin discards launcher stdout and captures the last
-4000 characters of stderr for reporting when the launcher exits unsuccessfully;
-this file is not a complete llama.cpp diagnostic transcript.
+launcher failures. In hidden mode, the plugin discards launcher stdout and
+captures the last 4000 characters of stderr for reporting when the launcher
+exits unsuccessfully. In visible mode, the model script's diagnostics go to
+its window and any script-owned logs; the plugin captures supervisor errors.
+The plugin log is not a complete llama.cpp diagnostic transcript.
 
 The existing TurboQuant start script writes its own llama.cpp diagnostic files
 under `OneDrive/Projects/TurboQuantLlamaCppSetup/logs`. Use the newest log there
 for backend details. If you supply a different start script, its own logging
 must preserve the diagnostic output you need.
+
+For an existing hidden process with a diagnostic log, open a separate live
+viewer without restarting the model:
+
+```powershell
+powershell.exe -NoProfile -File src/watch-log.ps1 -LogPath 'C:\path\to\current-model.log'
+```
+
+Run that command from the plugin directory in a visible PowerShell window.
+The viewer defaults to UTF-16 (`Unicode`) for the existing Windows PowerShell
+TurboQuant logs; use `-Encoding UTF8` for UTF-8 logs. Closing the viewer leaves
+the model running. It reads a file and does not restore output that was never
+logged.
+
+## 0.1.2: configurable diagnostic console
+
+- Visible model console is now the default (`openConsole: true`).
+- `openConsole: false` preserves hidden startup.
+- Included live log viewer provides diagnostics for an existing hidden process.
+- Cancellation, graph settings, context sizing, and voice selection are unchanged.
 
 ## 0.1.1: cancellation and timeouts
 
@@ -113,7 +156,7 @@ particular driver or llama.cpp defect. Token generation may be slightly
 slower without graphs. The plugin does not set DSH's stream-idle timeout;
 the tested profile's existing 30-minute deadline was preserved.
 
-The server launches hidden through PowerShell `-File`, passing the script
+The server launches through PowerShell `-File`, passing the script
 path and context as separate arguments and respecting the configured execution
 policy. An experimental encoded launcher was removed after Defender flagged
 a diagnostic command on the affected Windows setup. Paths are
@@ -146,7 +189,7 @@ npm test
 npm pack
 ```
 
-From your DSH checkout, add the resulting `martin-dsh-local-model-manager-0.1.1.tgz`
+From your DSH checkout, add the resulting `martin-dsh-local-model-manager-0.1.2.tgz`
 using the command above, then restart the web host. The package name is scoped;
 the Cordis plugin ID remains `local-model-manager` so existing configuration
 patches still apply. This repository is the source distribution; an npm registry
@@ -165,6 +208,7 @@ must stop the intended server. Point the provider's `baseURL` at
 | Setting or interface | Required behaviour / default |
 | --- | --- |
 | `startScript` | Local `.ps1` file accepting a positive integer `-ContextSize`; starts the configured backend. Execution respects Windows policy. |
+| `openConsole` | `true` by default, including the bundled patch. Opens a visible model console on a future start; `false` starts hidden. Existing processes are not restarted or shown by changing this setting. |
 | `stopScript` | Local `.ps1` file stopping the intended backend. Process selection belongs to this script; review it before use alongside other model servers. |
 | `settingsPath` | Defaults to `~/.dsh/profiles/web/cordis.patch.yml`. Context lookup uses a simple line reader expecting an unquoted `- id: <model-id>` followed by a numeric `contextWindow:`; full YAML syntax, aliases, and computed values are not supported. |
 | `defaultContextSize` | `225000` tokens, used when the request has no model ID or no matching numeric context entry can be read. Choose a value appropriate for your model and hardware. |
