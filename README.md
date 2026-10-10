@@ -149,6 +149,13 @@ default policy. Restart an already running Qwen server to apply a change.
 This option turns CUDA graphs off while keeping Qwen on the GPU. It does not
 select CPU inference or change a voice plugin's CPU/GPU TTS selection.
 
+The option is named **disableCudaGraphs**: turning this option on turns CUDA
+graphs off. In the tested backend, any inherited `GGML_CUDA_DISABLE_GRAPHS`
+value disables graphs, including `0`. The log's `graphs reused` counter is
+llama.cpp computation-graph reuse and does not establish CUDA graph activity.
+See the [graph investigation and remaining validation](docs/cuda-graphs.md)
+for measurements, upstream findings, and the safe path to testing a backend fix.
+
 On the affected RTX 5090 setup, disabling graphs restored fast processing
 of a 100k-token prompt while keeping the GPU voice model loaded. It is a
 workaround for the observed runtime behaviour, not a diagnosis of a
