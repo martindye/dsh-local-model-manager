@@ -1,0 +1,38 @@
+{
+  "name": "@martin/dsh-local-model-manager",
+  "version": "0.1.1",
+  "description": "DSH profile plugin: on-demand lifecycle for the local llama.cpp Qwen server, matched to the model dropdown, via a loopback OpenAI-compatible proxy. Zero changes to DSH itself.",
+  "type": "module",
+  "main": "src/index.mjs",
+  "exports": {
+    ".": { "default": "./src/index.mjs" },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "test",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "license": "MIT",
+  "author": "Martin Dye",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/martindye/dsh-local-model-manager.git"
+  },
+  "homepage": "https://github.com/martindye/dsh-local-model-manager#readme",
+  "bugs": {
+    "url": "https://github.com/martindye/dsh-local-model-manager/issues"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

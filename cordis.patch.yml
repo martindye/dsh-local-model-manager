@@ -1,0 +1,12 @@
+# @martin/dsh-local-model-manager bundle patch: registers the plugin row with this
+# machine's configuration. The plugin starts the local llama.cpp Qwen server
+# on demand, matched to the model dropdown, and fronts it with a loopback
+# proxy (127.0.0.1:8081). Point DSH at the proxy with ONE line in
+# ~/.dsh/settings.yaml:  baseURL: http://127.0.0.1:8081/v1
+- insert:
+    - id: local-model-manager
+      name: '@martin/dsh-local-model-manager'
+      config:
+        disableCudaGraphs: true
+        proxyPort: 8081
+        targetPort: 8080
