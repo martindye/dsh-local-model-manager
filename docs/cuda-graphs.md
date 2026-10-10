@@ -45,11 +45,49 @@ That PR's confirmed allocation-reclamation bug concerned cuBLAS versions older t
 
 The [legacy-pool recapture proposal, PR 26771](https://github.com/ggml-org/llama.cpp/pull/26771), concerns freed pointers in the legacy allocator. This installation is built with VMM enabled; applying that patch as the explanation would be unsupported.
 
-## Safe fix and remaining validation
+## Maintenance validation with CPU voice
 
-The currently validated mitigation is the plugin's supplied `disableCudaGraphs: true`. It restored long-prompt throughput without changing context, offload, or voice selection. Cancellation forwarding independently fixes abandoned requests occupying the only server slot; the existing 30-minute DSH timeout is separate from both issues.
+The user's active turn ended before maintenance began. The production executable and CUDA DLLs were preserved. No CUDA source patch, driver setting or model quantization change was needed for the graphs-ON tests below.
 
-A permanent graphs-ON fix remains unvalidated. The next diagnostic comparison requires an idle maintenance window:
+The active voice-chat plugin is `@martin/dsh-voice`. Its TTS server previously warmed every registered engine, including the GPU engine, even when the saved selection was CPU/Pocket. The local plugin correction passes the selected engine into warm-up and prevents CPU requests from falling back to a GPU engine. Explicit GPU selection remains available. Seven model-free regression tests cover these paths. This is a separate voice-plugin correction, not code bundled with the model manager. During these GPU stress tests no GPU voice model was resident; the saved choice remained Pocket. The user closed other applications before the 350k tests.
+
+These are fresh synthetic repeated-token prefills, with `cache_prompt: false`, greedy generation and 128 requested output tokens. Every completed case processed the full requested prompt with `cache_n: 0` and generated all 128 tokens. The vision projector was loaded, but these requests did not encode images. The backend, weights, turbo2 K/V, batch 512, microbatch 256 and full GPU offload were retained. At 350k the existing launcher's YaRN scaling applies because this exceeds the model's 262144-token native context.
+
+| Requested context (actual) | CUDA graphs | Fresh prompt tokens | Prefill seconds | Prompt tokens/s | Generation tokens/s |
+| --- | --- | --- | --- | --- | --- |
+| 225000 (225024) | ON | 20000 | 8.15 | 2453.49 | 46.99 |
+| 225000 (225024) | ON | 100000 | 59.18 | 1689.84 | 34.87 |
+| 225000 (225024) | ON | 150000 | 110.24 | 1360.65 | 30.11 |
+| 225000 (225024) | ON | 224000 | 210.01 | 1066.62 | 24.35 |
+| 225000 (225024) | OFF | 20000 | 7.86 | 2544.92 | 40.12 |
+| 225000 (225024) | OFF | 224000 | 206.66 | 1083.92 | 22.21 |
+| 350000 (350208) | ON | 20000 | 8.10 | 2469.45 | 47.63 |
+| 350000 (350208) | ON | 224000 | 208.12 | 1076.32 | 25.11 |
+| 350000 (350208) | ON | 348000 | 437.56 | 795.32 | 19.44 |
+| 350000 (350208) | OFF | 20000 | 8.05 | 2485.31 | 38.97 |
+| 350000 (350208) | OFF | 348000 | 433.79 | 802.23 | 18.29 |
+
+For the near-full 350k comparison, graphs-ON prefill was 0.87% slower and generation was 6.30% faster in this single pair of runs. Both completed normally. This is not a statistical performance guarantee. The ON sequence was 20k, 224k, 348k; the OFF sequence was 20k, 348k, so their preceding allocation histories differ. Every measured prompt still required a fresh full prefill.
+
+At 225k, graphs-ON near-full prefill was 1.62% slower and generation was 9.66% faster in the single comparison. The ON server also handled earlier 100k and 150k requests; the OFF sequence was 20k then 224k. Applications were closed between the early ON tests and the OFF comparisons. These differences limit causal interpretation of small timing changes. [Machine-readable synthetic results](cuda-graph-validation.json) retain all twelve completed stress cases and the exact configuration.
+
+Debug logs recorded `CUDA graph warmup complete`, confirming runtime graph activity rather than relying on the CPU `graphs reused` counter. After the 348k graphs-ON run, another fresh 20k prompt on the same process ran at 2558.90 prompt tokens/s and 46.47 generation tokens/s: the process did not remain slow after the large request.
+
+At 225k, the near-full run's worst recorded 512-token prefill batch took 0.85 seconds; at 350k, the 348k run's worst took 1.16 seconds. The earlier 16-22-second batches did not recur. No CUDA/cuBLAS error lines were found in these test logs.
+
+The 350k run loaded all 66/66 model layers on GPU. Its initial free VRAM was about 1.4 GiB, but minimum sampled free VRAM during the stress sequence was only **201 MiB**. Windows shared usage for the server stayed at 260 MiB throughout, rather than growing during the request. The 225k near-full run's shared usage stayed at 198 MiB. A loaded-server snapshot therefore does not establish full-prompt headroom. The 350k result is specific to the available VRAM during this test and does not establish that it will tolerate additional GPU workloads.
+
+The unchanged backend also passed `test-turbo-quant`, `test-quantize-fns`, the full CPU sweep (25979/25979 executed cases), the full CUDA0 sweep (21446/21446 executed cases), and a real-model turbo2 `llama-bench` smoke run. Unsupported cases were skipped and are not counted as tested coverage.
+
+These observations show that graphs ON works in the tested CPU-voice configuration. They are consistent with memory headroom contributing to the earlier failure; they do not prove that a particular cuBLAS defect or GPU voice alone caused it. The earlier comparison with the same GPU voice present in both modes still establishes graphs ON as the trigger in that configuration. Semantic long-context accuracy and image-input stress are not measured by the repeated-token benchmark.
+
+## Operating choices and remaining investigation
+
+The plugin's supplied bundle retains `disableCudaGraphs: true` as the earlier mitigation. It restored long-prompt throughput without changing context, offload, or voice selection. The tested local installation now uses `disableCudaGraphs: false` with no inherited disable variable, the corrected CPU/Pocket voice selection, and the original backend. After maintenance, the model manager restored the normal 225000 requested context (225024 actual) and launched the diagnostic console visibly. The user's next request is running; further tests have stopped and the maintenance lock has been removed.
+
+Cancellation forwarding independently fixes abandoned requests occupying the only server slot. Both existing DSH provider idle timeouts remain 1800000 ms (30 minutes); they are separate from graph capture and TTS selection. Console visibility remains an independent plugin option, enabled by default.
+
+The fixed-workspace upstream patch remains an unbuilt candidate, not a deployed fix. If the stall recurs with sufficient headroom and CPU voice selected, the next comparison requires an idle maintenance window:
 
 1. Keep the existing binary, configuration and a reproducible synthetic prompt as the baseline. Use fresh prompts or disable prefix reuse so prompt processing is actually measured.
 2. Build a separate candidate directory incorporating the official fixed-workspace patch. Do not overwrite loaded DLLs or the live launcher. Run the source repository's required codec, quantization and backend correctness gates, followed by TurboQuant model benchmarks.
@@ -57,4 +95,4 @@ A permanent graphs-ON fix remains unvalidated. The next diagnostic comparison re
 4. If the candidate still slows, collect a CUDA trace and graph capture/update/eviction counts to distinguish graph overhead, a kernel stall and Windows memory residency. Test smaller context/headroom separately so it cannot confound the patch comparison.
 5. Switch the plugin's launcher to the candidate and enable graphs only after correctness and sustained throughput checks pass. Rollback is the original launcher with `disableCudaGraphs: true`.
 
-No GPU benchmark, server restart, driver setting change, DLL replacement or graph setting change was performed during the live investigation. Source applicability is the only completed check on the candidate patch.
+No restart or benchmark was performed while the user's turn was active. Maintenance benchmarks and controlled test-server restarts occurred only after it finished. Source applicability remains the only completed check on the candidate cuBLAS patch; no production DLL was replaced.

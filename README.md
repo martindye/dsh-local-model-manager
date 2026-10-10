@@ -14,7 +14,7 @@ GPU types, models, or serving backends has not been established.
 | --- | --- |
 | Operating system | Windows; launches `powershell.exe`. Linux and macOS lifecycle support is not implemented or tested. |
 | Server | One configured llama.cpp-compatible backend, checked through `/v1/models` and `/props`. OpenAI API compatibility alone does not establish lifecycle compatibility. |
-| Live validation | Windows, NVIDIA RTX 5090, TurboQuant llama.cpp build `f6124e91`, Qwen3.8 27B Q6_K_L with its vision projector. |
+| Live validation | Windows, NVIDIA RTX 5090, TurboQuant llama.cpp build `f6124e91`, Qwen3.8 27B Q6_K_L with its vision projector; near-full 225k and 350k context tests with GPU voice absent. |
 | Node.js | Package declares Node.js 20 or newer; current local tests ran on Node.js 24.19.0. Other declared versions have not been validated. |
 | Launch scripts | Existing local PowerShell start/stop scripts supplied by the installer; neither scripts nor model weights are bundled. |
 | Model selection | Reads the selected model ID's context size and resizes the configured server. The external start script determines the weights and GPU arguments; the plugin does not automatically switch model files. |
@@ -153,8 +153,19 @@ The option is named **disableCudaGraphs**: turning this option on turns CUDA
 graphs off. In the tested backend, any inherited `GGML_CUDA_DISABLE_GRAPHS`
 value disables graphs, including `0`. The log's `graphs reused` counter is
 llama.cpp computation-graph reuse and does not establish CUDA graph activity.
-See the [graph investigation and remaining validation](docs/cuda-graphs.md)
-for measurements, upstream findings, and the safe path to testing a backend fix.
+See the [graph investigation and completed validation](docs/cuda-graphs.md)
+for measurements, upstream findings, and the remaining backend investigation.
+
+Subsequent maintenance tests completed fresh 224k and 348k prompts with CUDA
+graphs ON using the unchanged backend and CPU voice selected. At 350k, prefill
+was within 1% of graphs OFF and generation was about 6% faster in the single
+comparison. The 350k stress sequence reached only 201 MiB free VRAM after other
+applications were closed. These results apply to that installation and workload.
+The separate `@martin/dsh-voice` preload correction is not bundled with this
+model manager; this plugin does not configure TTS or select its device.
+The supplied bundle retains the graphs-OFF mitigation. To enable graphs for
+a validated installation, set `disableCudaGraphs: false`, ensure the disable
+variable is absent, and restart the backend only after active work has ended.
 
 On the affected RTX 5090 setup, disabling graphs restored fast processing
 of a 100k-token prompt while keeping the GPU voice model loaded. It is a
