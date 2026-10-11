@@ -1,236 +1,51 @@
 # @martin/dsh-local-model-manager
 
-DSH profile plugin: **on-demand lifecycle for the local llama.cpp Qwen
-server, driven by the model dropdown, with zero changes to DSH.**
+DSH profile plugin for on-demand **llama.cpp startup, model selection and context resizing**, with a loopback OpenAI-compatible proxy and launch settings UI. No DSH source patches are required.
 
-## Current scope and maturity
+## Version 0.2.0: portable launchers and model profiles
 
-Version 0.1.3 is an early Windows/Qwen-focused release. Its proxy and
-cancellation logic are reusable, but its launch mechanism and server probes
-assume the setup described below. Compatibility with other operating systems,
-GPU types, models, or serving backends has not been established.
+Configure literal executable/argument arrays on Windows, Linux or macOS, map dropdown entries to different weights and contexts, or use an externally managed llama.cpp server. The existing Windows/TurboQuant/Qwen configuration continues using its original scripts and defaults. CUDA graphs and the diagnostic window remain ON by default. Provider timeouts and voice CPU/GPU selection are unchanged.
 
-| Area | Current implementation and validation |
+See the [portable setup guide](docs/portable-setup.md) for commands, model profiles, terminal adapters, logging, authentication and external-server mode. Serving binaries, model weights, GPU libraries and installation-specific stop commands are not bundled. This release does not manage Ollama or vLLM.
+
+| Area | Implementation and validation |
 | --- | --- |
-| Operating system | Windows; launches `powershell.exe`. Linux and macOS lifecycle support is not implemented or tested. |
-| Server | One configured llama.cpp-compatible backend, checked through `/v1/models` and `/props`. OpenAI API compatibility alone does not establish lifecycle compatibility. |
-| Live validation | Windows, NVIDIA RTX 5090, TurboQuant llama.cpp build `f6124e91`, Qwen3.8 27B Q6_K_L with its vision projector; near-full 225k and 350k context tests with GPU voice absent. |
-| Node.js | Package declares Node.js 20 or newer; current local tests ran on Node.js 24.19.0. Other declared versions have not been validated. |
-| Launch scripts | Existing local PowerShell start/stop scripts supplied by the installer; neither scripts nor model weights are bundled. |
-| Model selection | Reads the selected model ID's context size and resizes the configured server. The external start script determines the weights and GPU arguments; the plugin does not automatically switch model files. |
-| CUDA graphs | Optional workaround observed on the tested Windows/TurboQuant setup; results have not been established across other hardware or builds. |
-
-The default script paths assume a TurboQuant installation beneath the current
-user's `OneDrive/Projects/TurboQuantLlamaCppSetup`. Configure your own paths
-before using a different installation. The proxy serves `/v1/*` on loopback;
-this release manages one backend and leaves it running between requests.
-
-### Test coverage and limits
-
-Eighteen automated tests cover five HTTP proxy behaviours, six launcher
-argument/environment checks, two native configuration-schema checks and five
-browser contribution checks. They cover cancellation, normal and interrupted
-responses, live launch preferences, child-only environment changes, UI writes,
-read-only connections and rejected writes. The HTTP tests use local mock
-servers; no automated test starts a real model. Browser checks use a stub
-renderer and settings service, rather than an end-to-end DSH browser session.
-
-Separate 0.1.3 smoke checks used real React/jsdom controls to exercise both
-toggle writes, read-only state and clean unmount. Checks against the local
-DSH Loader and Settings source confirmed volatile-only edits avoid remounting
-and expose both preferences as plain booleans. The active DSH host was not
-reloaded for these checks; complete browser/Host persistence remains outside
-the automated coverage.
-
-Separate manual checks on the setup above exercised a real plugin cold start,
-long-prompt processing, and cancellation followed by another request. These
-checks provide evidence for that configuration, rather than a compatibility
-matrix. Real start/stop/resize orchestration and DSH host reloads are not
-covered by the automated tests.
-
-For 0.1.2, a separate Windows smoke test used a dummy start script to confirm
-that the visible launcher displays stdout, native stderr, and PowerShell host
-messages. A live log viewer was also checked against an already running model
-without restarting it. These checks do not add other platforms to the support
-scope.
-
-Portable launch commands, backend-specific lifecycle checks, and broader
-orchestration and platform tests remain future work. No compatibility claim
-is made for other OpenAI-compatible backends merely because their requests
-can be proxied.
+| Windows | Original PowerShell scripts retained; custom executable launchers support visible or hidden diagnostics. Native CPU-only process tests cover both paths. |
+| Linux/macOS | Direct executable or `sh` script launchers; hidden diagnostics written to a file. Separate windows require a configured terminal adapter. Only launch-plan checks ran locally for these platforms; real model/GPU validation remains outstanding. |
+| Server | One configured llama.cpp backend, probed through `/v1/models` and `/props`. Other OpenAI-compatible servers are not automatically lifecycle-compatible. |
+| Model selection | Context-only dropdown entries retain fixed weights; optional `modelProfiles` switch weights by advertised alias, including equal-context models. |
+| Real-model evidence | Earlier Windows/RTX 5090/TurboQuant `f6124e91`/Qwen3.8 27B Q6_K_L vision tests included near-full 225k and 350k contexts. Other models, hardware and operating systems need their own validation. |
+| Node.js | Requires Node.js 20 or newer. Local tests ran on Windows Node.js 24.19.0; the optional CI template targets Node.js 20 across three platforms. |
 
 ## How it works
 
-- Runs a small OpenAI-compatible proxy at `127.0.0.1:8081` *inside the DSH
-  host process* (it dies with the harness; nothing extra to manage).
-- DSH points at it with one line in `~/.dsh/settings.yaml`:
-  `baseURL: http://127.0.0.1:8081/v1` in the provider configuration.
-- First message after a reboot: the proxy starts the server via
-  `start-qwen3.8-27b-q6_0-turboquant-vision.ps1 -ContextSize <N>`, where N is
-  the selected dropdown entry's `contextWindow` from the configured `settingsPath`. The
-  request is held open (SSE keep-alives for streaming) until the model is up.
-- Change the dropdown, send a new message → if the running server's
-  `n_ctx` (from `/props`, allowing llama's round-up) doesn't match, the
-  proxy stops the server (`stop-server.ps1`) and restarts it with the new
-  `-ContextSize`.
-- Nothing ever auto-stops the server. A server started by the plugin
-  outlives a harness restart and is adopted on the next probe.
-- Log: `~/.dsh/logs/local-model.log`.
+The plugin runs a proxy inside the DSH host at `127.0.0.1:8081`, forwarding `/v1/*` to the configured llama.cpp server at `127.0.0.1:8080`. Set the provider's `baseURL` to `http://127.0.0.1:8081/v1`.
 
-### Diagnostics and console window
+On a request, the manager reads the selected dropdown entry's context. It adopts a matching server, starts an unavailable server, or stops and relaunches a mismatched server using the configured stop command. Streaming requests receive SSE keep-alives while startup finishes. Context allocation may round upward by less than `contextRounding` (4096 tokens by default). An unavailable context probe is trusted for an otherwise matching running server.
 
-From 0.1.2, `openConsole` defaults to `true`. The plugin uses a hidden
-supervisor to start the configured PowerShell script in a separate visible
-console with its diagnostic output connected to that window. The supervisor
-waits for the script and propagates its exit code. Closing the model's own
-console can stop the model.
+The backend stays running between requests and survives manager disposal. A new manager adopts it on the next request. Cancellation closes the upstream connection, releasing abandoned generation/prefill work. A failed stop that leaves the backend online prevents launching a replacement.
 
-To choose the behaviour, add this setting to the `local-model-manager` row in
-your web profile's `cordis.patch.yml`:
+Use `manageServer: false` when another service owns startup and shutdown. The manager then never launches, stops or resizes it.
 
-```yaml
-- id: local-model-manager
-  config:
-    openConsole: true
-```
+## Launch settings and diagnostics
 
-Set `openConsole: false` to launch hidden. The value must be a boolean. The
-option controls future starts: it does not restart a model or change the
-window of an already running process. From 0.1.3 the setting is also available
-on the plugin's settings page and updates live without remounting the proxy.
-The DSH host must load the plugin update once to register its new settings;
-do that after active work has finished.
+Open **Plugins → @martin/dsh-local-model-manager** for **Enable CUDA graphs** and **Open diagnostic window**, both ON by default. The controls also appear in the bundle row's configuration page. They save live through DSH's settings service and affect future starts without remounting the proxy. They do not restart or change the window of a running model. Read-only connections show disabled controls.
 
-`~/.dsh/logs/local-model.log` contains proxy activity, startup progress, and
-launcher failures. In hidden mode, the plugin discards launcher stdout and
-captures the last 4000 characters of stderr for reporting when the launcher
-exits unsuccessfully. In visible mode, the model script's diagnostics go to
-its window and any script-owned logs; the plugin captures supervisor errors.
-The plugin log is not a complete llama.cpp diagnostic transcript.
+The compatible YAML key `disableCudaGraphs` is the inverse of the positive UI switch. Enabling graphs removes `GGML_CUDA_DISABLE_GRAPHS` from the model child's environment; disabling sets it to `1`. The Host and voice environments remain untouched. Actual graph support depends on the llama.cpp build. See the [graph investigation and earlier measurements](docs/cuda-graphs.md); this release adds no CUDA backend patch or fresh model stress tests.
 
-The existing TurboQuant start script writes its own llama.cpp diagnostic files
-under `OneDrive/Projects/TurboQuantLlamaCppSetup/logs`. Use the newest log there
-for backend details. If you supply a different start script, its own logging
-must preserve the diagnostic output you need.
+The original Windows launcher uses PowerShell `-File` with separate script/context arguments, respects execution policy and opens a visible diagnostic console. Custom Windows commands use a separate supervisor with literal native arguments, without encoded commands. Closing the model console can stop its process.
 
-For an existing hidden process with a diagnostic log, open a separate live
-viewer without restarting the model:
+Proxy activity and failures go to `~/.dsh/logs/local-model.log`. Hidden custom/POSIX launches write stdout and stderr to `commandLogPath`, defaulting to `~/.dsh/logs/llama-server.log`. The legacy Windows script retains its own diagnostic logs and bounded stderr reporting. Its existing TurboQuant logs are beneath `OneDrive/Projects/TurboQuantLlamaCppSetup/logs`.
+
+To watch an existing Windows log without restarting the model, run this from a visible PowerShell window in the plugin directory:
 
 ```powershell
 powershell.exe -NoProfile -File src/watch-log.ps1 -LogPath 'C:\path\to\current-model.log'
 ```
 
-Run that command from the plugin directory in a visible PowerShell window.
-The viewer defaults to UTF-16 (`Unicode`) for the existing Windows PowerShell
-TurboQuant logs; use `-Encoding UTF8` for UTF-8 logs. Closing the viewer leaves
-the model running. It reads a file and does not restore output that was never
-logged.
-
-## 0.1.3: graphs enabled and launch settings UI
-
-Open **Plugins → @martin/dsh-local-model-manager** to choose **Enable CUDA
-graphs** and **Open diagnostic window**. Both default to ON. The same controls
-are available from the bundle's `local-model-manager` row configuration page.
-Changes save immediately through DSH's revisioned settings service and affect
-the next model launch. They do not stop, restart, resize or hide a running
-model. A connection without writable Host settings shows disabled controls.
-
-The existing YAML key `disableCudaGraphs` is retained for compatibility:
-the UI's positive **Enable CUDA graphs** switch writes its inverse. Enabling
-graphs removes `GGML_CUDA_DISABLE_GRAPHS` only from the future model child's
-environment, including an inherited value of `0`; disabling sets it to `1`.
-The Host and voice environments are unchanged. The backend must have graph
-support compiled in for the enabled preference to have an effect.
-
-This UI requires DSH's volatile configuration support and
-`@deepseek-ai/schemastery` 3.18.4 or newer within the 3.x series. The plugin uses
-the Host's shared settings, locale and Plugins services; it does not patch
-DSH or require a separate client build.
-
-## 0.1.2: configurable diagnostic console
-
-- Visible model console is now the default (`openConsole: true`).
-- `openConsole: false` preserves hidden startup.
-- Included live log viewer provides diagnostics for an existing hidden process.
-- Cancellation, graph settings, context sizing, and voice selection are unchanged.
-
-## 0.1.1: cancellation and timeouts
-
-When a user stops generation or DSH's stream-idle timeout expires, the
-proxy closes the upstream llama-server connection too. This releases the
-single model slot instead of leaving abandoned prefills ahead of new work.
-Requests abandoned while the server is starting are not forwarded when it
-becomes ready. Normal completion and provider errors retain their existing
-streaming and non-streaming behaviour.
-
-This release does not change provider timeouts, context sizes, model
-parameters, or voice plugins. The host must restart to load the update.
-
-### Optional CUDA graph workaround
-
-For the persistent long-prompt slowdown observed with the TurboQuant Qwen
-server on Windows, set `disableCudaGraphs: true` in the
-`local-model-manager` plugin's config. The plugin sets
-`GGML_CUDA_DISABLE_GRAPHS=1` only in the Qwen launch environment; voice
-servers and the DSH host keep their own settings. The plugin's fallback
-default and supplied bundle are now `false` (graphs ON). The earlier 0.1.1
-and 0.1.2 bundles used `true` as a mitigation. From 0.1.3, `false` clears the
-disable variable in the model child's environment. The preference takes
-effect on the next backend launch; changing it does not trigger a restart.
-
-This option turns CUDA graphs off while keeping Qwen on the GPU. It does not
-select CPU inference or change a voice plugin's CPU/GPU TTS selection.
-
-The option is named **disableCudaGraphs**: turning this option on turns CUDA
-graphs off. In the tested backend, any inherited `GGML_CUDA_DISABLE_GRAPHS`
-value disables graphs, including `0`. The log's `graphs reused` counter is
-llama.cpp computation-graph reuse and does not establish CUDA graph activity.
-See the [graph investigation and completed validation](docs/cuda-graphs.md)
-for measurements, upstream findings, and the remaining backend investigation.
-
-Subsequent maintenance tests completed fresh 224k and 348k prompts with CUDA
-graphs ON using the unchanged backend and CPU voice selected. At 350k, prefill
-was within 1% of graphs OFF and generation was about 6% faster in the single
-comparison. The 350k stress sequence reached only 201 MiB free VRAM after other
-applications were closed. These results apply to that installation and workload.
-The separate `@martin/dsh-voice` preload correction is not bundled with this
-model manager; this plugin does not configure TTS or select its device.
-The supplied bundle now enables graphs. If the original stall recurs, turn
-**Enable CUDA graphs** OFF or set `disableCudaGraphs: true`, then relaunch
-the backend only after active work has ended.
-
-On the affected RTX 5090 setup, disabling graphs restored fast processing
-of a 100k-token prompt while keeping the GPU voice model loaded. It is a
-workaround for the observed runtime behaviour, not a diagnosis of a
-particular driver or llama.cpp defect. Token generation may be slightly
-slower without graphs. The plugin does not set DSH's stream-idle timeout;
-the tested profile's existing 30-minute deadline was preserved.
-
-The server launches through PowerShell `-File`, passing the script
-path and context as separate arguments and respecting the configured execution
-policy. An experimental encoded launcher was removed after Defender flagged
-a diagnostic command on the affected Windows setup. Paths are
-configurable; their defaults resolve against the current user's home
-directory rather than a fixed user name. `settingsPath` defaults to
-`~/.dsh/profiles/web/cordis.patch.yml`.
-
-Launcher failures are logged and reported promptly. Windows `RemoteSigned`
-policy can block an unsigned script marked as downloaded. Review the configured
-script and scan it before using PowerShell's `Unblock-File` on that specific
-file; the plugin does not unblock files or change execution policy.
-
-Run `npm test` to check cancellation during prefill and generation, normal
-completion, non-streaming errors, and interrupted upstream streams. Run
-`npm pack` to create an installable plugin archive. Install that archive
-using `pnpm dsh plugin --profile web add <archive-path>`.
+The viewer defaults to UTF-16 (`Unicode`); supply `-Encoding UTF8` for UTF-8 logs. Closing the viewer leaves the model running.
 
 ## Install
-
-```
-pnpm dsh plugin --profile web add <plugin-directory-or-tgz>
-```
-
-To install from this repository:
 
 ```powershell
 git clone https://github.com/martindye/dsh-local-model-manager.git
@@ -240,52 +55,38 @@ npm test
 npm pack
 ```
 
-From your DSH checkout, add the resulting `martin-dsh-local-model-manager-0.1.3.tgz`
-using the command above, then restart the web host. The package name is scoped;
-the Cordis plugin ID remains `local-model-manager` so existing configuration
-patches still apply. This repository is the source distribution; an npm registry
-publication is not required for directory or archive installation.
+From your DSH checkout, install the directory or generated archive:
 
-Configure `settingsPath`, `startScript`, `stopScript`, and `logPath` in the
-`local-model-manager` row of your web profile's `cordis.patch.yml`. The default
-scripts use the existing Windows TurboQuant setup beneath the current user's
-`OneDrive/Projects/TurboQuantLlamaCppSetup`; those scripts and model weights are
-not bundled. The start script must accept `-ContextSize`, and the stop script
-must stop the intended server. Point the provider's `baseURL` at
-`http://127.0.0.1:8081/v1`.
+```text
+pnpm dsh plugin --profile web add <path-to-martin-dsh-local-model-manager-0.2.0.tgz>
+```
 
-### Configuration contract
+Load the update by restarting the DSH host **after active work finishes**. Package name: `@martin/dsh-local-model-manager`; Cordis plugin ID: `local-model-manager`. Existing patches retain that ID. Directory/archive installation needs no npm registry publication.
 
-| Setting or interface | Required behaviour / default |
+The Windows defaults assume the existing scripts beneath the current user's `OneDrive/Projects/TurboQuantLlamaCppSetup/scripts`. Configure your own `startScript` and `stopScript`, or portable `startCommand`/`startArgs` and `stopCommand`/`stopArgs`, before using another installation. A custom launcher without a stop command can cold-start/adopt but refuses resizing before stopping anything. Review stop commands to ensure they target only the intended backend.
+
+| Setting | Default / meaning |
 | --- | --- |
-| `startScript` | Local `.ps1` file accepting a positive integer `-ContextSize`; starts the configured backend. Execution respects Windows policy. |
-| `openConsole` | `true` by default, including the bundled patch. Opens a visible model console on a future start; `false` starts hidden. Existing processes are not restarted or shown by changing this setting. |
-| `stopScript` | Local `.ps1` file stopping the intended backend. Process selection belongs to this script; review it before use alongside other model servers. |
-| `settingsPath` | Defaults to `~/.dsh/profiles/web/cordis.patch.yml`. Context lookup uses a simple line reader expecting an unquoted `- id: <model-id>` followed by a numeric `contextWindow:`; full YAML syntax, aliases, and computed values are not supported. |
-| `defaultContextSize` | `225000` tokens, used when the request has no model ID or no matching numeric context entry can be read. Choose a value appropriate for your model and hardware. |
+| `settingsPath` | `~/.dsh/profiles/web/cordis.patch.yml`; YAML/JSON `id` and numeric `contextWindow` lookup, including quoted IDs and aliases. DSH expressions are never executed. |
+| `defaultContextSize` | `225000`; choose a suitable size for another installation. |
+| `modelContexts`, `modelProfiles`, `defaultModel` | Optional context/weight mappings and default profile; see the setup guide for precedence and alias handling. |
 | `proxyHost` / `proxyPort` | `127.0.0.1` / `8081`. |
 | `targetHost` / `targetPort` | `127.0.0.1` / `8080`. |
-| `startTimeoutMs` | `420000` ms (seven minutes) to become ready; nonzero launcher exits are reported earlier. This is separate from DSH's inference timeout. |
-| `logPath` | Defaults to `~/.dsh/logs/local-model.log`. |
-| Context probe | Reads numeric `default_generation_settings.n_ctx` from `/props`, with top-level `n_ctx` as a fallback. Allows rounding up by less than 4096 tokens. If context is unavailable, an already running server is trusted without resizing. |
-| `disableCudaGraphs` | `false` in both the component and bundle (graphs ON). Live UI preference; `true` disables graphs on the next launch. |
+| `startTimeoutMs` | `420000` (seven minutes) for startup, separate from the provider's inference timeout. |
+| `stopTimeoutMs`, `probeTimeoutMs` | `20000`, `4000` respectively. |
+| `disableCudaGraphs`, `openConsole` | `false`, `true`; live preferences affecting future starts. |
+| `targetApiKey`, `commandEnv` | Optional secret backend authorization and child environment configuration. |
 
-For profiles installed under the previous unscoped name, replace
-`dsh-local-model-manager` with `@martin/dsh-local-model-manager` in the profile's
-dependency and bundle entries after installing the scoped package.
+For the original installation, no profile migration is needed. The separate `@martin/dsh-voice` CPU/Pocket preload correction remains in the voice plugin; this manager neither selects nor loads TTS engines. Existing 30-minute provider deadlines are outside this plugin and are preserved.
+
+## Tests and limits
+
+Run `npm test`. The 47 tests cover forwarding/cancellation, DSH schema and browser contributions, portable launch plans, YAML lookup, readiness deadlines, lifecycle failures, real CPU-only fixture startup/resize/model switching, authentication and adoption after manager disposal. Windows-only tests exercise the legacy PowerShell path and native argument quoting. Fixtures use isolated ephemeral ports and random shutdown tokens, with no model weights or VRAM allocations. An optional model-free CI template targets Windows, Linux and macOS; it has not run for this release. See [CI setup](ci/README.md).
+
+Separate earlier React/jsdom and DSH Loader/Settings checks verified toggle writes, disabled controls and volatile-only settings projection. Complete browser/Host persistence remains outside automated coverage. Different terminal applications, real GPU backends and other models are not validated by CPU fixtures or launch-plan tests. No live production model is restarted as part of the 0.2.0 test suite.
 
 ## Rollback
 
-1. `settings.yaml`: `baseURL` back to `http://127.0.0.1:8080/v1`.
-2. `pnpm dsh plugin --profile web remove @martin/dsh-local-model-manager`
-   (or just delete its row from `dsh.profile.bundles` in
-   `~/.dsh/profiles/web/package.json`).
-3. Restart the gateway.
-
-## Design notes
-
-- Node built-ins for the proxy, plus DSH's shared Schemastery peer for live settings.
-- The proxy only understands `/v1/*`; anything else gets a 404.
-- Model→context mapping is read from `settingsPath` per request
-  (the single source of truth; no duplicated table here).
-- Unknown model ids fall back to `defaultContextSize` (225000).
+1. Change the provider's `baseURL` back to `http://127.0.0.1:8080/v1`.
+2. Run `pnpm dsh plugin --profile web remove @martin/dsh-local-model-manager`.
+3. Restart the DSH host after active work finishes.

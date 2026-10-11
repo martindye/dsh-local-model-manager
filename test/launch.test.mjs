@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { serverLaunch } from '../src/launch.mjs'
+import { serverLaunch as portableLaunch } from '../src/launch.mjs'
+
+// This regression suite preserves the Windows launch plan on every test host.
+const serverLaunch = (config, context, env) => portableLaunch(config, context, env, 'win32')
 
 test('graph workaround is confined to the launched model environment', () => {
   const parent = { PATH: 'existing-path', VOICE_CHAT_ENGINE: 'qwen3' }

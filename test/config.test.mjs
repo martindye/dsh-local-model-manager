@@ -10,7 +10,7 @@ test('DSH schema defaults enable graphs and console with live launch preferences
   assert.equal(Config.dict.disableCudaGraphs.meta.volatile, true)
   assert.equal(Config.dict.openConsole.meta.volatile, true)
   assert.equal(Config.dict.proxyPort.meta.volatile, undefined)
-  const launch = serverLaunch(config, 225000, { GGML_CUDA_DISABLE_GRAPHS: '1' })
+  const launch = serverLaunch(config, 225000, { GGML_CUDA_DISABLE_GRAPHS: '1' }, 'win32')
   assert.equal(launch.options.env.GGML_CUDA_DISABLE_GRAPHS, undefined)
 })
 

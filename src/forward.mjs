@@ -31,10 +31,11 @@ export function forwardRequest(req, res, body, url, earlySse, target, log) {
       if (HOP_HEADERS.has(key.toLowerCase())) continue
       headers[key] = Array.isArray(value) ? value.join(', ') : String(value)
     }
-    headers.host = `${target.host}:${target.port}`
+    Object.assign(headers, target.headers ?? {})
+    headers.host = `${target.host.includes(':') ? `[${target.host}]` : target.host}:${target.port}`
     if (body.length > 0) headers['content-length'] = String(body.length)
     const upstream = http.request(
-      { ...target, path: url.pathname + url.search, method: req.method, headers },
+      { host: target.host, port: target.port, path: url.pathname + url.search, method: req.method, headers },
       (response) => {
         upstreamRes = response
         if (settled) { response.destroy(); return }
