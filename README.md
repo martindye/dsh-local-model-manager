@@ -4,13 +4,13 @@ DSH profile plugin for on-demand **llama.cpp startup, model selection and contex
 
 ## CUDA graphs slowdown fixed on the tested setup
 
-**CUDA graphs are restored and ON by default.** The reported graphs-ON slowdown was resolved in the validated Windows/RTX 5090/TurboQuant/Qwen setup using the original backend with CPU/Pocket voice selected. Fresh near-full prompts completed at both 225k and 350k context without the earlier 16–22-second batch stalls or CUDA/cuBLAS errors in the test logs.
+**CUDA graphs are restored and ON by default.** The reported graphs-ON slowdown was resolved in the validated Windows/RTX 5090/TurboQuant/Qwen setup using the original backend. Fresh near-full prompts completed at both 225k and 350k context without the earlier 16–22-second batch stalls or CUDA/cuBLAS errors in the test logs.
 
-The companion `@martin/dsh-voice` fix prevents unintended GPU-engine preload and GPU fallback when CPU voice is selected. The model manager clears the inherited graph-disable flag for enabled launches and retains the graphs UI toggle. No CUDA backend patch was required for the successful tests. These results establish the working tested configuration; they do not prove a single underlying cause or guarantee every model, build or GPU. See the [measurements and fix details](docs/cuda-graphs.md).
+The model manager clears the inherited graph-disable flag for enabled launches and retains the graphs UI toggle. No CUDA backend patch was required for the successful tests. These results establish the working tested configuration; they do not prove a single underlying cause or guarantee every model, build or GPU. See the [measurements and fix details](docs/cuda-graphs.md).
 
-Version 0.2.1 makes this resolution visible beside the graph toggle in the plugin UI. It changes the UI and documentation without changing model launch behaviour.
+Version 0.2.2 makes this resolution visible beside the graph toggle in the plugin UI. It changes the UI and documentation without changing model launch behaviour.
 
-## Version 0.2.1: portable launchers and model profiles
+## Version 0.2.2: portable launchers and model profiles
 
 Configure literal executable/argument arrays on Windows, Linux or macOS, map dropdown entries to different weights and contexts, or use an externally managed llama.cpp server. The existing Windows/TurboQuant/Qwen configuration continues using its original scripts and defaults. CUDA graphs and the diagnostic window remain ON by default. Provider timeouts and voice CPU/GPU selection are unchanged.
 
@@ -66,7 +66,7 @@ npm pack
 From your DSH checkout, install the directory or generated archive:
 
 ```text
-pnpm dsh plugin --profile web add <path-to-martin-dsh-local-model-manager-0.2.1.tgz>
+pnpm dsh plugin --profile web add <path-to-martin-dsh-local-model-manager-0.2.2.tgz>
 ```
 
 Load the update by restarting the DSH host **after active work finishes**. Package name: `@martin/dsh-local-model-manager`; Cordis plugin ID: `local-model-manager`. Existing patches retain that ID. Directory/archive installation needs no npm registry publication.
@@ -85,7 +85,7 @@ The Windows defaults assume the existing scripts beneath the current user's `One
 | `disableCudaGraphs`, `openConsole` | `false`, `true`; live preferences affecting future starts. |
 | `targetApiKey`, `commandEnv` | Optional secret backend authorization and child environment configuration. |
 
-For the original installation, no profile migration is needed. The separate `@martin/dsh-voice` CPU/Pocket preload correction remains in the voice plugin; this manager neither selects nor loads TTS engines. Existing 30-minute provider deadlines are outside this plugin and are preserved.
+For the original installation, no profile migration is needed. Existing 30-minute provider deadlines are outside this plugin and are preserved.
 
 ## Tests and limits
 

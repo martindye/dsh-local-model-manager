@@ -4,9 +4,9 @@ Updated 2026-10-11. This records one Windows/RTX 5090 installation, not a genera
 
 ## Resolution: graphs ON working on the tested setup
 
-**The reported CUDA graphs slowdown was resolved for the validated Windows/Qwen configuration.** With CPU/Pocket voice selected, the unchanged backend completed fresh near-full 225k and 350k context tests with graphs ON. The earlier 16–22-second batch stalls did not recur, and the test logs contained no CUDA/cuBLAS errors. Graphs remain enabled by default.
+**The reported CUDA graphs slowdown was resolved for the validated Windows/Qwen configuration.** The unchanged backend completed fresh near-full 225k and 350k context tests with graphs ON. The earlier 16–22-second batch stalls did not recur, and the test logs contained no CUDA/cuBLAS errors. Graphs remain enabled by default.
 
-The separate `@martin/dsh-voice` fix prevents unintended GPU voice warm-up and fallback for a CPU selection. The model manager removes an inherited `GGML_CUDA_DISABLE_GRAPHS` flag when graphs are enabled. Plugin 0.2.1 highlights this resolution beside its graph toggle and in the README. No CUDA backend patch was required; the successful configuration does not establish a single root cause or a universal backend fix. The evidence and remaining investigation below distinguish the deployed plugin corrections from unbuilt upstream candidates.
+The model manager removes an inherited `GGML_CUDA_DISABLE_GRAPHS` flag when graphs are enabled. The plugin highlights this resolution beside its graph toggle and in the README. No CUDA backend patch was required; the successful configuration does not establish a single root cause or a universal backend fix. The evidence and remaining investigation below distinguish the deployed launcher behaviour from unbuilt upstream candidates.
 
 ## What the option means
 
@@ -51,11 +51,11 @@ That PR's confirmed allocation-reclamation bug concerned cuBLAS versions older t
 
 The [legacy-pool recapture proposal, PR 26771](https://github.com/ggml-org/llama.cpp/pull/26771), concerns freed pointers in the legacy allocator. This installation is built with VMM enabled; applying that patch as the explanation would be unsupported.
 
-## Maintenance validation with CPU voice
+## Maintenance validation
 
 The user's active turn ended before maintenance began. The production executable and CUDA DLLs were preserved. No CUDA source patch, driver setting or model quantization change was needed for the graphs-ON tests below.
 
-The active voice-chat plugin is `@martin/dsh-voice`. Its TTS server previously warmed every registered engine, including the GPU engine, even when the saved selection was CPU/Pocket. The local plugin correction passes the selected engine into warm-up and prevents CPU requests from falling back to a GPU engine. Explicit GPU selection remains available. Seven model-free regression tests cover these paths. This is a separate voice-plugin correction, not code bundled with the model manager. During these GPU stress tests no GPU voice model was resident; the saved choice remained Pocket. The user closed other applications before the 350k tests.
+No other GPU model was resident during these stress tests. Other applications were closed before the 350k tests. These conditions matter when interpreting the available VRAM and applying the results to another installation.
 
 These are fresh synthetic repeated-token prefills, with `cache_prompt: false`, greedy generation and 128 requested output tokens. Every completed case processed the full requested prompt with `cache_n: 0` and generated all 128 tokens. The vision projector was loaded, but these requests did not encode images. The backend, weights, turbo2 K/V, batch 512, microbatch 256 and full GPU offload were retained. At 350k the existing launcher's YaRN scaling applies because this exceeds the model's 262144-token native context.
 
@@ -89,7 +89,7 @@ These observations show that graphs ON works in the tested CPU-voice configurati
 
 ## Operating choices and remaining investigation
 
-Plugin 0.1.3 enables graphs in the supplied bundle (`disableCudaGraphs: false`) and provides live UI controls for graphs and console visibility. The earlier `true` mitigation remains available if the stall recurs; it restored long-prompt throughput without changing context, offload, or voice selection. The tested local installation uses graphs ON, the corrected CPU/Pocket voice selection, and the original backend. After maintenance, the model manager restored the normal 225000 requested context (225024 actual) and launched the diagnostic console visibly. Model stress tests have stopped and the maintenance lock has been removed. The 0.2.0 portable-launch update retains these defaults and adds no CUDA backend changes or new model stress tests.
+Plugin 0.1.3 enables graphs in the supplied bundle (`disableCudaGraphs: false`) and provides live UI controls for graphs and console visibility. The earlier `true` mitigation remains available if the stall recurs; it restored long-prompt throughput without changing context, offload, or voice selection. The tested local installation uses graphs ON, CPU voice selected, and the original backend. After maintenance, the model manager restored the normal 225000 requested context (225024 actual) and launched the diagnostic console visibly. Model stress tests have stopped and the maintenance lock has been removed. The 0.2.0 portable-launch update retains these defaults and adds no CUDA backend changes or new model stress tests.
 
 Cancellation forwarding independently fixes abandoned requests occupying the only server slot. Both existing DSH provider idle timeouts remain 1800000 ms (30 minutes); they are separate from graph capture and TTS selection. Console visibility remains an independent plugin option, enabled by default.
 
