@@ -2,20 +2,26 @@ import { fileURLToPath } from 'node:url'
 
 const VISIBLE_LAUNCHER = fileURLToPath(new URL('./launch-visible.ps1', import.meta.url))
 
+/** Read current DSH volatile values immediately before a future model launch. */
+export function launchPreferences(config) {
+  const current = (value, fallback) => value === undefined ? fallback
+    : typeof value?.get === 'function' ? value.get() : value
+  const disableCudaGraphs = current(config.disableCudaGraphs, false)
+  const openConsole = current(config.openConsole, true)
+  if (typeof disableCudaGraphs !== 'boolean') throw new Error('disableCudaGraphs must be a boolean')
+  if (typeof openConsole !== 'boolean') throw new Error('openConsole must be a boolean')
+  return { disableCudaGraphs, openConsole }
+}
+
 /** Build the Windows server launch; its environment applies only to Qwen. */
 export function serverLaunch(config, contextSize, inheritedEnv) {
   if (!Number.isSafeInteger(contextSize) || contextSize <= 0) {
     throw new Error('contextSize must be a positive safe integer')
   }
-  if (typeof config.disableCudaGraphs !== 'boolean') {
-    throw new Error('disableCudaGraphs must be a boolean')
-  }
-  const openConsole = config.openConsole === undefined ? true : config.openConsole
-  if (typeof openConsole !== 'boolean') {
-    throw new Error('openConsole must be a boolean')
-  }
+  const { disableCudaGraphs, openConsole } = launchPreferences(config)
   const env = { ...inheritedEnv }
-  if (config.disableCudaGraphs) env.GGML_CUDA_DISABLE_GRAPHS = '1'
+  if (disableCudaGraphs) env.GGML_CUDA_DISABLE_GRAPHS = '1'
+  else delete env.GGML_CUDA_DISABLE_GRAPHS
   return {
     command: 'powershell.exe',
     args: openConsole

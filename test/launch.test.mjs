@@ -26,9 +26,26 @@ test('explicit console choice is validated', () => {
   assert.throws(() => serverLaunch({ startScript: 'start.ps1', disableCudaGraphs: false, openConsole: null }, 225000, {}), /openConsole must be a boolean/)
 })
 
-test('default preserves the inherited CUDA graph policy', () => {
-  const launch = serverLaunch({ startScript: 'start.ps1', disableCudaGraphs: false }, 225000, { GGML_CUDA_DISABLE_GRAPHS: '0' })
-  assert.equal(launch.options.env.GGML_CUDA_DISABLE_GRAPHS, '0')
+test('enabling graphs clears an inherited disable flag only in the model child', () => {
+  const parent = { GGML_CUDA_DISABLE_GRAPHS: '0', VOICE_CHAT_PRELOAD_ENGINE: 'pocket' }
+  const launch = serverLaunch({ startScript: 'start.ps1', disableCudaGraphs: false }, 225000, parent)
+  assert.equal(launch.options.env.GGML_CUDA_DISABLE_GRAPHS, undefined)
+  assert.equal(parent.GGML_CUDA_DISABLE_GRAPHS, '0')
+  assert.equal(launch.options.env.VOICE_CHAT_PRELOAD_ENGINE, 'pocket')
+})
+
+test('live settings are read for each future launch without changing the previous launch', () => {
+  let disabled = false
+  let consoleVisible = true
+  const config = { startScript: 'start.ps1', disableCudaGraphs: { get: () => disabled }, openConsole: { get: () => consoleVisible } }
+  const first = serverLaunch(config, 225000, {})
+  disabled = true
+  consoleVisible = false
+  const second = serverLaunch(config, 225000, {})
+  assert.equal(first.options.env.GGML_CUDA_DISABLE_GRAPHS, undefined)
+  assert.match(first.args[2], /launch-visible\.ps1$/)
+  assert.equal(second.options.env.GGML_CUDA_DISABLE_GRAPHS, '1')
+  assert.equal(second.args[2], 'start.ps1')
 })
 
 test('invalid launch settings fail before starting a process', () => {

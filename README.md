@@ -5,7 +5,7 @@ server, driven by the model dropdown, with zero changes to DSH.**
 
 ## Current scope and maturity
 
-Version 0.1.2 is an early Windows/Qwen-focused release. Its proxy and
+Version 0.1.3 is an early Windows/Qwen-focused release. Its proxy and
 cancellation logic are reusable, but its launch mechanism and server probes
 assume the setup described below. Compatibility with other operating systems,
 GPU types, models, or serving backends has not been established.
@@ -27,10 +27,20 @@ this release manages one backend and leaves it running between requests.
 
 ### Test coverage and limits
 
-Ten automated tests cover five HTTP proxy behaviours (disconnects during
-prefill and output, normal completion, non-streaming errors, and interrupted
-upstream streams) and five launcher argument/environment checks. The HTTP
-tests use local mock servers; the launcher tests do not start a real model.
+Eighteen automated tests cover five HTTP proxy behaviours, six launcher
+argument/environment checks, two native configuration-schema checks and five
+browser contribution checks. They cover cancellation, normal and interrupted
+responses, live launch preferences, child-only environment changes, UI writes,
+read-only connections and rejected writes. The HTTP tests use local mock
+servers; no automated test starts a real model. Browser checks use a stub
+renderer and settings service, rather than an end-to-end DSH browser session.
+
+Separate 0.1.3 smoke checks used real React/jsdom controls to exercise both
+toggle writes, read-only state and clean unmount. Checks against the local
+DSH Loader and Settings source confirmed volatile-only edits avoid remounting
+and expose both preferences as plain booleans. The active DSH host was not
+reloaded for these checks; complete browser/Host persistence remains outside
+the automated coverage.
 
 Separate manual checks on the setup above exercised a real plugin cold start,
 long-prompt processing, and cancellation followed by another request. These
@@ -86,8 +96,10 @@ your web profile's `cordis.patch.yml`:
 
 Set `openConsole: false` to launch hidden. The value must be a boolean. The
 option controls future starts: it does not restart a model or change the
-window of an already running process. The DSH host must load the plugin update
-before the new setting takes effect.
+window of an already running process. From 0.1.3 the setting is also available
+on the plugin's settings page and updates live without remounting the proxy.
+The DSH host must load the plugin update once to register its new settings;
+do that after active work has finished.
 
 `~/.dsh/logs/local-model.log` contains proxy activity, startup progress, and
 launcher failures. In hidden mode, the plugin discards launcher stdout and
@@ -113,6 +125,27 @@ The viewer defaults to UTF-16 (`Unicode`) for the existing Windows PowerShell
 TurboQuant logs; use `-Encoding UTF8` for UTF-8 logs. Closing the viewer leaves
 the model running. It reads a file and does not restore output that was never
 logged.
+
+## 0.1.3: graphs enabled and launch settings UI
+
+Open **Plugins → @martin/dsh-local-model-manager** to choose **Enable CUDA
+graphs** and **Open diagnostic window**. Both default to ON. The same controls
+are available from the bundle's `local-model-manager` row configuration page.
+Changes save immediately through DSH's revisioned settings service and affect
+the next model launch. They do not stop, restart, resize or hide a running
+model. A connection without writable Host settings shows disabled controls.
+
+The existing YAML key `disableCudaGraphs` is retained for compatibility:
+the UI's positive **Enable CUDA graphs** switch writes its inverse. Enabling
+graphs removes `GGML_CUDA_DISABLE_GRAPHS` only from the future model child's
+environment, including an inherited value of `0`; disabling sets it to `1`.
+The Host and voice environments are unchanged. The backend must have graph
+support compiled in for the enabled preference to have an effect.
+
+This UI requires DSH's volatile configuration support and
+`@deepseek-ai/schemastery` 3.18.4 or newer within the 3.x series. The plugin uses
+the Host's shared settings, locale and Plugins services; it does not patch
+DSH or require a separate client build.
 
 ## 0.1.2: configurable diagnostic console
 
@@ -140,11 +173,10 @@ server on Windows, set `disableCudaGraphs: true` in the
 `local-model-manager` plugin's config. The plugin sets
 `GGML_CUDA_DISABLE_GRAPHS=1` only in the Qwen launch environment; voice
 servers and the DSH host keep their own settings. The plugin's fallback
-default is `false`; the supplied Windows/TurboQuant bundle explicitly
-enables it for the tested setup. This bundled choice is not a recommendation
-for every machine. With `false`, the plugin leaves the inherited graph
-environment unchanged; if the variable is unset, the backend uses its own
-default policy. Restart an already running Qwen server to apply a change.
+default and supplied bundle are now `false` (graphs ON). The earlier 0.1.1
+and 0.1.2 bundles used `true` as a mitigation. From 0.1.3, `false` clears the
+disable variable in the model child's environment. The preference takes
+effect on the next backend launch; changing it does not trigger a restart.
 
 This option turns CUDA graphs off while keeping Qwen on the GPU. It does not
 select CPU inference or change a voice plugin's CPU/GPU TTS selection.
@@ -163,9 +195,9 @@ comparison. The 350k stress sequence reached only 201 MiB free VRAM after other
 applications were closed. These results apply to that installation and workload.
 The separate `@martin/dsh-voice` preload correction is not bundled with this
 model manager; this plugin does not configure TTS or select its device.
-The supplied bundle retains the graphs-OFF mitigation. To enable graphs for
-a validated installation, set `disableCudaGraphs: false`, ensure the disable
-variable is absent, and restart the backend only after active work has ended.
+The supplied bundle now enables graphs. If the original stall recurs, turn
+**Enable CUDA graphs** OFF or set `disableCudaGraphs: true`, then relaunch
+the backend only after active work has ended.
 
 On the affected RTX 5090 setup, disabling graphs restored fast processing
 of a 100k-token prompt while keeping the GPU voice model loaded. It is a
@@ -203,11 +235,12 @@ To install from this repository:
 ```powershell
 git clone https://github.com/martindye/dsh-local-model-manager.git
 cd dsh-local-model-manager
+npm ci
 npm test
 npm pack
 ```
 
-From your DSH checkout, add the resulting `martin-dsh-local-model-manager-0.1.2.tgz`
+From your DSH checkout, add the resulting `martin-dsh-local-model-manager-0.1.3.tgz`
 using the command above, then restart the web host. The package name is scoped;
 the Cordis plugin ID remains `local-model-manager` so existing configuration
 patches still apply. This repository is the source distribution; an npm registry
@@ -235,7 +268,7 @@ must stop the intended server. Point the provider's `baseURL` at
 | `startTimeoutMs` | `420000` ms (seven minutes) to become ready; nonzero launcher exits are reported earlier. This is separate from DSH's inference timeout. |
 | `logPath` | Defaults to `~/.dsh/logs/local-model.log`. |
 | Context probe | Reads numeric `default_generation_settings.n_ctx` from `/props`, with top-level `n_ctx` as a fallback. Allows rounding up by less than 4096 tokens. If context is unavailable, an already running server is trusted without resizing. |
-| `disableCudaGraphs` | Component fallback `false`; bundled patch `true`. See the tested workaround and inherited-environment behaviour above. |
+| `disableCudaGraphs` | `false` in both the component and bundle (graphs ON). Live UI preference; `true` disables graphs on the next launch. |
 
 For profiles installed under the previous unscoped name, replace
 `dsh-local-model-manager` with `@martin/dsh-local-model-manager` in the profile's
@@ -251,7 +284,7 @@ dependency and bundle entries after installing the scoped package.
 
 ## Design notes
 
-- Pure Node built-ins, zero dependencies.
+- Node built-ins for the proxy, plus DSH's shared Schemastery peer for live settings.
 - The proxy only understands `/v1/*`; anything else gets a 404.
 - Model→context mapping is read from `settingsPath` per request
   (the single source of truth; no duplicated table here).

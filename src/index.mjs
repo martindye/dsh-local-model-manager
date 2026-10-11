@@ -21,39 +21,21 @@
  *  - nothing ever stops the server on its own; a server this plugin started
  *    outlives a harness restart and is adopted on the next probe.
  *
- * Pure Node built-ins; no dependencies. Machine-specific values come from
+ * Node built-ins plus DSH's config schema. Machine-specific values come from
  * the plugin config (the bundle's cordis.patch.yml).
  */
 
 import http from 'node:http'
 import { forwardRequest } from './forward.mjs'
-import { serverLaunch } from './launch.mjs'
+import { serverLaunch, launchPreferences } from './launch.mjs'
+import { DEFAULTS } from './config.mjs'
+export { Config } from './config.mjs'
 import { spawn } from 'node:child_process'
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { homedir } from 'node:os'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'local-model-manager'
-
-const USER_DIR = homedir().replaceAll('\\', '/')
-const DEFAULTS = {
-  proxyHost: '127.0.0.1',
-  proxyPort: 8081,
-  targetHost: '127.0.0.1',
-  targetPort: 8080,
-  settingsPath: `${USER_DIR}/.dsh/profiles/web/cordis.patch.yml`,
-  startScript: `${USER_DIR}/OneDrive/Projects/TurboQuantLlamaCppSetup/scripts/start-qwen3.8-27b-q6_0-turboquant-vision.ps1`,
-  stopScript: `${USER_DIR}/OneDrive/Projects/TurboQuantLlamaCppSetup/scripts/stop-server.ps1`,
-  logPath: `${USER_DIR}/.dsh/logs/local-model.log`,
-  defaultContextSize: 225000,
-  startTimeoutMs: 420000,
-  pollMs: 2000,
-  keepAliveMs: 15000,
-  maxBodyBytes: 50 * 1024 * 1024,
-  disableCudaGraphs: false,
-  openConsole: true,
-}
 
 let cfg = {}
 let logEnabled = false
@@ -126,7 +108,8 @@ function ctxMatches(nCtx, requested) {
 /* ------------------------------------------------------------------ */
 
 function startServer(contextSize) {
-  log(`starting server: ${cfg.startScript} -ContextSize ${contextSize} (CUDA graphs ${cfg.disableCudaGraphs ? 'disabled' : 'default'}, console ${cfg.openConsole ? 'visible' : 'hidden'})`)
+  const preferences = launchPreferences(cfg)
+  log(`starting server: ${cfg.startScript} -ContextSize ${contextSize} (CUDA graphs ${preferences.disableCudaGraphs ? 'disabled' : 'enabled'}, console ${preferences.openConsole ? 'visible' : 'hidden'})`)
   const launch = serverLaunch(cfg, contextSize, process.env)
   const child = spawn(launch.command, launch.args, launch.options)
   let errorTail = ''
@@ -377,10 +360,13 @@ async function handle(req, res) {
 /* Plugin entry                                                        */
 /* ------------------------------------------------------------------ */
 
-export function apply(_ctx, config = {}) {
+export function apply(ctx, config = {}) {
   try {
     cfg = { ...DEFAULTS, ...config }
     logEnabled = Boolean(cfg.logPath)
+    ctx?.inject?.(['settings'], (child) => {
+      child.effect(() => child.settings.configure({ auto: false }, ctx.fiber))
+    })
     log(`starting: proxy ${cfg.proxyHost}:${cfg.proxyPort} -> ${cfg.targetHost}:${cfg.targetPort} (default context ${cfg.defaultContextSize})`)
 
     const server = http.createServer((req, res) => {

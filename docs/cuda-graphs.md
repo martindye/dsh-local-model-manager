@@ -1,12 +1,12 @@
 # CUDA graph slowdown investigation
 
-Updated 2026-10-10. This records one Windows/RTX 5090 installation, not a general diagnosis for every llama.cpp backend.
+Updated 2026-10-11. This records one Windows/RTX 5090 installation, not a general diagnosis for every llama.cpp backend.
 
 ## What the option means
 
 The plugin option is **disableCudaGraphs**. Setting it to `true` turns CUDA graph capture/replay OFF for future Qwen starts. Qwen still runs on the GPU. It does not change voice-chat, voice, or CPU/GPU TTS selection.
 
-Setting it to `false` preserves the inherited environment. In the tested backend, the presence of `GGML_CUDA_DISABLE_GRAPHS` disables graphs regardless of its value: even `0` disables them. To test graphs ON, the variable must be absent from the server's launch environment. Changing configuration cannot alter a server already running.
+From plugin 0.1.3, setting it to `false` removes `GGML_CUDA_DISABLE_GRAPHS` from the future model child's environment. Earlier versions preserved an inherited value. In the tested backend, the presence of that variable disables graphs regardless of its value: even `0` disables them. The plugin's UI presents the positive **Enable CUDA graphs** switch, ON by default, and saves the inverse `disableCudaGraphs` value. Neither UI changes nor environment changes alter or restart a server already running.
 
 Two log messages are easy to misread:
 
@@ -83,7 +83,7 @@ These observations show that graphs ON works in the tested CPU-voice configurati
 
 ## Operating choices and remaining investigation
 
-The plugin's supplied bundle retains `disableCudaGraphs: true` as the earlier mitigation. It restored long-prompt throughput without changing context, offload, or voice selection. The tested local installation now uses `disableCudaGraphs: false` with no inherited disable variable, the corrected CPU/Pocket voice selection, and the original backend. After maintenance, the model manager restored the normal 225000 requested context (225024 actual) and launched the diagnostic console visibly. The user's next request is running; further tests have stopped and the maintenance lock has been removed.
+Plugin 0.1.3 enables graphs in the supplied bundle (`disableCudaGraphs: false`) and provides live UI controls for graphs and console visibility. The earlier `true` mitigation remains available if the stall recurs; it restored long-prompt throughput without changing context, offload, or voice selection. The tested local installation uses graphs ON, the corrected CPU/Pocket voice selection, and the original backend. After maintenance, the model manager restored the normal 225000 requested context (225024 actual) and launched the diagnostic console visibly. Model stress tests have stopped and the maintenance lock has been removed. Preparing the 0.1.3 update does not restart the active model.
 
 Cancellation forwarding independently fixes abandoned requests occupying the only server slot. Both existing DSH provider idle timeouts remain 1800000 ms (30 minutes); they are separate from graph capture and TTS selection. Console visibility remains an independent plugin option, enabled by default.
 

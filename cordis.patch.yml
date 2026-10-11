@@ -7,7 +7,7 @@
     - id: local-model-manager
       name: '@martin/dsh-local-model-manager'
       config:
-        disableCudaGraphs: true
+        disableCudaGraphs: false
         openConsole: true
         proxyPort: 8081
         targetPort: 8080
