@@ -1,6 +1,6 @@
 {
   "name": "@martin/dsh-local-model-manager",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "DSH profile plugin: portable llama.cpp lifecycle and model profiles, matched to the model dropdown, with a loopback OpenAI-compatible proxy and launch settings UI.",
   "type": "module",
   "main": "src/index.mjs",

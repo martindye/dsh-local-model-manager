@@ -9,8 +9,10 @@ window.__ModuleLoader__.load({
     const ENTRY = 'local-model-manager'
     const en = {
       title: 'Model launch options',
-      summary: 'CUDA graphs and the diagnostic window for future model launches.',
+      summary: 'CUDA graphs restored on the tested Windows/Qwen setup and enabled by default. Configure future model launches here.',
       graphs: 'Enable CUDA graphs',
+      graphsStatus: 'CUDA graphs slowdown fixed on the tested Windows/Qwen setup.',
+      graphsDetail: 'Graphs ON passed 225k and 350k context tests with CPU/Pocket voice selected. The companion @martin/dsh-voice fix prevents unwanted GPU voice preload; no CUDA backend patch was required. Other setups need their own validation.',
       console: 'Open diagnostic window',
       applies: 'Changes are saved immediately and apply to the next model launch. The running model is left untouched.',
       loading: 'Loading model launch options…',
@@ -22,8 +24,10 @@ window.__ModuleLoader__.load({
     }
     const zh = {
       title: '模型启动选项',
-      summary: '设置下次模型启动时的 CUDA 图和诊断窗口。',
+      summary: '已在测试的 Windows/Qwen 配置上恢复 CUDA 图，默认开启。在此设置下次模型启动选项。',
       graphs: '启用 CUDA 图',
+      graphsStatus: '已在测试的 Windows/Qwen 配置上解决 CUDA 图相关的性能下降。',
+      graphsDetail: '选择 CPU/Pocket 语音后，已通过开启 CUDA 图的 225k 和 350k 上下文测试。配套的 @martin/dsh-voice 修复避免了意外预加载 GPU 语音模型，无需修改 CUDA 后端。其他配置仍需单独验证。',
       console: '打开诊断窗口',
       applies: '更改会立即保存，并在下次模型启动时生效。当前运行的模型不受影响。',
       loading: '正在加载模型启动选项…',
@@ -61,12 +65,16 @@ window.__ModuleLoader__.load({
       const toggle = (label, checked, field, invert = false) => h('label', {
         key: field, style: { display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.5rem 0' },
       }, h('input', {
-        type: 'checkbox', checked, disabled, 'aria-describedby': 'local-model-manager-applies',
+        type: 'checkbox', checked, disabled, 'aria-describedby': invert
+          ? 'local-model-manager-graphs-status local-model-manager-graphs-detail local-model-manager-applies'
+          : 'local-model-manager-applies',
         onChange: (event) => save(field, invert ? !event.target.checked : event.target.checked),
       }), t(label))
       return h('section', { 'aria-label': t('title') },
         h('h3', null, t('title')),
         toggle('graphs', state.value?.disableCudaGraphs !== true, 'disableCudaGraphs', true),
+        h('p', { id: 'local-model-manager-graphs-status' }, h('strong', null, t('graphsStatus'))),
+        h('p', { id: 'local-model-manager-graphs-detail' }, t('graphsDetail')),
         toggle('console', state.value?.openConsole !== false, 'openConsole'),
         h('p', { id: 'local-model-manager-applies' }, t('applies')),
         !state.writable && h('p', null, t('readOnly')),

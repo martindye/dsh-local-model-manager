@@ -2,6 +2,12 @@
 
 Updated 2026-10-11. This records one Windows/RTX 5090 installation, not a general diagnosis for every llama.cpp backend.
 
+## Resolution: graphs ON working on the tested setup
+
+**The reported CUDA graphs slowdown was resolved for the validated Windows/Qwen configuration.** With CPU/Pocket voice selected, the unchanged backend completed fresh near-full 225k and 350k context tests with graphs ON. The earlier 16–22-second batch stalls did not recur, and the test logs contained no CUDA/cuBLAS errors. Graphs remain enabled by default.
+
+The separate `@martin/dsh-voice` fix prevents unintended GPU voice warm-up and fallback for a CPU selection. The model manager removes an inherited `GGML_CUDA_DISABLE_GRAPHS` flag when graphs are enabled. Plugin 0.2.1 highlights this resolution beside its graph toggle and in the README. No CUDA backend patch was required; the successful configuration does not establish a single root cause or a universal backend fix. The evidence and remaining investigation below distinguish the deployed plugin corrections from unbuilt upstream candidates.
+
 ## What the option means
 
 The plugin option is **disableCudaGraphs**. Setting it to `true` turns CUDA graph capture/replay OFF for future Qwen starts. Qwen still runs on the GPU. It does not change voice-chat, voice, or CPU/GPU TTS selection.

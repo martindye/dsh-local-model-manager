@@ -1,8 +1,10 @@
 # Portable llama.cpp setup
 
-Version 0.2.0 supports configurable llama.cpp commands on Windows, Linux and macOS. Model weights, serving binaries, acceleration libraries and stop commands belong to the installation. This plugin does not download models, choose quantization, select GPU layers or modify voice plugins. It does not manage Ollama or vLLM.
+Version 0.2.1 supports configurable llama.cpp commands on Windows, Linux and macOS. Model weights, serving binaries, acceleration libraries and stop commands belong to the installation. This plugin does not download models, choose quantization, select GPU layers or modify voice plugins. It does not manage Ollama or vLLM.
 
 ## Existing Windows setup
+
+**CUDA graphs slowdown fixed on the validated Windows/Qwen setup:** graphs ON completed near-full 225k and 350k context tests with CPU/Pocket voice selected and the original CUDA backend. The separate `@martin/dsh-voice` correction prevents unwanted GPU voice preload, while the manager clears the inherited graph-disable flag for enabled starts. Graphs remain ON by default; the UI now displays the resolution and its validation scope. See the [fix details and measurements](cuda-graphs.md). Other configurations require their own validation.
 
 No configuration migration is needed for the original TurboQuant/Qwen installation. Its existing `startScript`, `stopScript`, context lookup, loopback ports, graphs-ON preference and visible console remain the defaults on Windows. The start script receives exactly `-ContextSize <N>` as before. The current provider timeouts are outside this plugin and are unchanged.
 
