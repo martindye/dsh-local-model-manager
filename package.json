@@ -18,6 +18,7 @@
     "test",
     "cordis.patch.yml",
     "docs",
+    "ci",
     "README.md"
   ],
   "dsh": {
