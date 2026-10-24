@@ -64,6 +64,13 @@ export function createModelProxy(config = {}, dependencies = {}) {
 
   async function handle(request, response) {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1')
+    if (url.pathname === '/health') {
+      // What the manager is doing right now, for the model dial and probes:
+      // 'starting' means a launch is in flight and any request will be held.
+      response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      response.end(JSON.stringify({ ok: true, ...lifecycle.health }))
+      return
+    }
     if (url.pathname !== '/v1' && !url.pathname.startsWith('/v1/')) {
       response.writeHead(404, { 'content-type': 'application/json' })
       response.end(JSON.stringify({ error: { message: '@martin/dsh-local-model-manager only fronts /v1/*', type: 'invalid_request_error' } }))

@@ -85,6 +85,19 @@ test('real CPU child: simultaneous cold requests share one launch', { timeout: 1
   assert.equal(f.logs.filter(line => line.startsWith('starting server:')).length, 1)
 })
 
+test('health endpoint reports the lifecycle state the dial relies on', { timeout: 15000 }, async t => {
+  const f = await fixture(t)
+  const healthUrl = `http://127.0.0.1:${f.proxy.server.address().port}/health`
+  const early = await (await fetch(healthUrl)).json()
+  assert.equal(early.ok, true)
+  assert.equal(early.kind, 'idle')
+  await f.complete('small')
+  const after = await (await fetch(healthUrl)).json()
+  assert.equal(after.kind, 'ready')
+  assert.equal(typeof after.since, 'number')
+  assert.equal(typeof after.detail, 'string')
+})
+
 test('real CPU child: equal-context profiles switch weights by served alias', { timeout: 20000 }, async t => {
   const f = await fixture(t, { modelProfiles: { a: { servedModel: 'alias-a' }, b: { modelPath: '/test-only/b.gguf' } } })
   const first = await f.complete('a')

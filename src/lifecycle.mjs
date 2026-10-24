@@ -61,6 +61,13 @@ export class ModelLifecycle {
     this.probe = dependencies.probe ?? (() => probeServer(this.config))
     this.sleep = dependencies.sleep ?? sleep
     this.now = dependencies.now ?? Date.now
+    /**
+     * What the manager is doing right now, for readers that cannot ask the
+     * server itself (e.g. the dial while the server is cold-starting):
+     * 'idle' (nothing launched yet), 'starting' (launch in flight, holding
+     * any request that arrived), 'ready' (a matching server is serving).
+     */
+    this.state = { kind: 'idle', since: this.now(), detail: '' }
     this.pending = null
     this.child = null
     this.childExitCode = null
@@ -74,10 +81,20 @@ export class ModelLifecycle {
     return context && model
   }
 
-  start(request) {
+  /** Copy of the current state, for the proxy's /health endpoint. */
+  get health() {
+    return { ...this.state }
+  }
+
+  setState(kind, detail = '') {
+    this.state = { kind, since: this.now(), detail }
+  }
+
+  start(request, label = 'start') {
     const preferences = launchPreferences(request.config)
     const launch = serverLaunch(request.config, request.contextSize, this.environment, this.platform, request.modelId)
     this.log(`starting server: ${request.config.startCommand || request.config.startScript} -ContextSize ${request.contextSize} (CUDA graphs ${preferences.disableCudaGraphs ? 'disabled' : 'enabled'}, console ${preferences.openConsole ? 'visible' : 'hidden'})`)
+    this.setState('starting', `${label} (context ${request.contextSize})`)
     this.childExitCode = null
     let descriptor
     let child
@@ -161,7 +178,16 @@ export class ModelLifecycle {
     if (this.disposed) throw new Error('Model manager has been disposed')
     const operation = this.ensureOnce(request)
     this.pending = operation
-    try { return await operation } finally { if (this.pending === operation) this.pending = null }
+    try {
+      const result = await operation
+      this.setState('ready')
+      return result
+    } catch (error) {
+      // A failed launch leaves no server: report idle (the dial falls back
+      // to "down") instead of a stale "starting".
+      if (this.state.kind === 'starting') this.setState('idle', String(error.message ?? error))
+      throw error
+    } finally { if (this.pending === operation) this.pending = null }
   }
 
   async ensureOnce(request) {
@@ -173,13 +199,13 @@ export class ModelLifecycle {
     }
     if (!probe.running) {
       this.log(`server not running — starting with -ContextSize ${request.contextSize}`)
-      this.start(request)
+      this.start(request, 'cold start')
       return this.waitForReady(request, 'cold start')
     }
     if (!this.matches(probe, request)) {
       this.log(`model/context mismatch: running n_ctx=${probe.nCtx}, requested ${request.contextSize} — restarting to match`)
       await this.stop(request)
-      this.start(request)
+      this.start(request, 'resize/model restart')
       return this.waitForReady(request, 'resize/model restart')
     }
     this.log(probe.nCtx == null ? `server running but n_ctx unknown — trusting it (requested ${request.contextSize})`
